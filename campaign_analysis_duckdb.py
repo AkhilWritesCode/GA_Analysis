@@ -841,29 +841,106 @@ def main():
                 # Export functionality
                 st.subheader("📥 Export Results")
                 
-                col1, col2 = st.columns(2)
+                # Create properly formatted export data matching the display format
+                export_data = []
                 
-                with col1:
-                    csv_data = analysis_df.to_csv(index=False)
-                    st.download_button(
-                        label="📊 Download Analysis Results (CSV)",
-                        data=csv_data,
-                        file_name=f"campaign_analysis_duckdb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
+                # Add header rows for Base Week 1 vs Campaign comparison
+                export_data.append({
+                    'Region': 'Region',
+                    'Sessions_Total_Base': f'{base1_label}',
+                    'Sessions_Total_Campaign': f'{campaign_label}',
+                    'Sessions_Total_Change': '%change',
+                    'Sessions_Google_Base': f'{base1_label}',
+                    'Sessions_Google_Campaign': f'{campaign_label}',
+                    'Sessions_Google_Change': '%change',
+                    'Net_Sales_Base': f'{base1_label}',
+                    'Net_Sales_Campaign': f'{campaign_label}',
+                    'Net_Sales_Change': '%change'
+                })
                 
-                with col2:
-                    # Convert to parquet for faster future loading
-                    parquet_buffer = io.BytesIO()
-                    analysis_df.to_parquet(parquet_buffer, index=False)
-                    parquet_data = parquet_buffer.getvalue()
-                    
-                    st.download_button(
-                        label="🚀 Download Analysis Results (Parquet)",
-                        data=parquet_data,
-                        file_name=f"campaign_analysis_duckdb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet",
-                        mime="application/octet-stream"
-                    )
+                # Add Base Week 1 vs Campaign data
+                for _, row in analysis_df.iterrows():
+                    export_data.append({
+                        'Region': row['Region'],
+                        'Sessions_Total_Base': f"{row['Sessions_Total_Base1']:,.0f}",
+                        'Sessions_Total_Campaign': f"{row['Sessions_Total_Campaign']:,.0f}",
+                        'Sessions_Total_Change': row['Sessions_Total_Change1'],
+                        'Sessions_Google_Base': f"{row['Sessions_Google_Base1']:,.0f}",
+                        'Sessions_Google_Campaign': f"{row['Sessions_Google_Campaign']:,.0f}",
+                        'Sessions_Google_Change': row['Sessions_Google_Change1'],
+                        'Net_Sales_Base': f"${row['Net_Sales_Base1']:,.0f}",
+                        'Net_Sales_Campaign': f"${row['Net_Sales_Campaign']:,.0f}",
+                        'Net_Sales_Change': row['Net_Sales_Change1']
+                    })
+                
+                # Add separator row
+                export_data.append({
+                    'Region': '',
+                    'Sessions_Total_Base': '',
+                    'Sessions_Total_Campaign': '',
+                    'Sessions_Total_Change': '',
+                    'Sessions_Google_Base': '',
+                    'Sessions_Google_Campaign': '',
+                    'Sessions_Google_Change': '',
+                    'Net_Sales_Base': '',
+                    'Net_Sales_Campaign': '',
+                    'Net_Sales_Change': ''
+                })
+                
+                # Add header rows for Base Week 2 vs Campaign comparison
+                export_data.append({
+                    'Region': 'Region',
+                    'Sessions_Total_Base': f'{base2_label}',
+                    'Sessions_Total_Campaign': f'{campaign_label}',
+                    'Sessions_Total_Change': '%change',
+                    'Sessions_Google_Base': f'{base2_label}',
+                    'Sessions_Google_Campaign': f'{campaign_label}',
+                    'Sessions_Google_Change': '%change',
+                    'Net_Sales_Base': f'{base2_label}',
+                    'Net_Sales_Campaign': f'{campaign_label}',
+                    'Net_Sales_Change': '%change'
+                })
+                
+                # Add Base Week 2 vs Campaign data
+                for _, row in analysis_df.iterrows():
+                    export_data.append({
+                        'Region': row['Region'],
+                        'Sessions_Total_Base': f"{row['Sessions_Total_Base2']:,.0f}",
+                        'Sessions_Total_Campaign': f"{row['Sessions_Total_Campaign']:,.0f}",
+                        'Sessions_Total_Change': row['Sessions_Total_Change2'],
+                        'Sessions_Google_Base': f"{row['Sessions_Google_Base2']:,.0f}",
+                        'Sessions_Google_Campaign': f"{row['Sessions_Google_Campaign']:,.0f}",
+                        'Sessions_Google_Change': row['Sessions_Google_Change2'],
+                        'Net_Sales_Base': f"${row['Net_Sales_Base2']:,.0f}",
+                        'Net_Sales_Campaign': f"${row['Net_Sales_Campaign']:,.0f}",
+                        'Net_Sales_Change': row['Net_Sales_Change2']
+                    })
+                
+                # Convert to DataFrame and then CSV
+                export_df = pd.DataFrame(export_data)
+                
+                # Rename columns to match the display format
+                export_df.columns = [
+                    'Region',
+                    'Sessions (Total) - Base',
+                    'Sessions (Total) - Campaign', 
+                    'Sessions (Total) - %change',
+                    'Sessions (Google) - Base',
+                    'Sessions (Google) - Campaign',
+                    'Sessions (Google) - %change',
+                    'Net Sales (Total) - Base',
+                    'Net Sales (Total) - Campaign',
+                    'Net Sales (Total) - %change'
+                ]
+                
+                csv_data = export_df.to_csv(index=False)
+                st.download_button(
+                    label="📊 Download Analysis Results (CSV)",
+                    data=csv_data,
+                    file_name=f"campaign_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
                 
             except Exception as e:
                 st.error(f"Error generating analysis: {str(e)}")
