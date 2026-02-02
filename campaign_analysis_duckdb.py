@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -503,9 +504,197 @@ def format_analysis_table_html(df, base1_label, base2_label, campaign_label):
     """
     
     return html
+
+def display_report(report):
+    """Display a stored analysis report with download option"""
+    
+    # Extract report data
+    report_id = report['id']
+    timestamp = report['timestamp']
+    analysis_df = report['analysis_df']
+    base1_label = report['base1_label']
+    base2_label = report['base2_label']
+    campaign_label = report['campaign_label']
+    config = report['config']
+    
+    # Create expandable section for each report
+    with st.expander(f"📊 Analysis Report #{report_id} - Generated at {timestamp.strftime('%Y-%m-%d %H:%M:%S')}", expanded=True):
+        
+        # Show configuration summary
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**📅 Period Configuration:**")
+            st.write(f"• Base Week 1: {config['base_week1_start']} to {config['base_week1_end']}")
+            st.write(f"• Base Week 2: {config['base_week2_start']} to {config['base_week2_end']}")
+            st.write(f"• Campaign: {config['campaign_start']} to {config['campaign_end']}")
+            
+        with col2:
+            st.write("**🌍 Region Configuration:**")
+            st.write(f"• Target Regions: {', '.join(config['selected_regions'])}")
+            if config['control_regions']:
+                st.write(f"• Control Regions: {', '.join(config['control_regions'])}")
+            st.write(f"• Google Sources: {len(config['google_sources'])} selected")
+            st.write(f"• Method: {config['base_week_method']}")
+        
+        # Generate and display HTML table
+        html_table = format_analysis_table_html(analysis_df, base1_label, base2_label, campaign_label)
+        st.components.v1.html(html_table, height=600, scrolling=True)
+        
+        # Create CSV data for download (matching exact display format)
+        csv_data = create_csv_export_data(analysis_df, base1_label, base2_label, campaign_label)
+        
+        # Download button for this specific report
+        st.download_button(
+            label=f"📥 Download Report #{report_id} as CSV",
+            data=csv_data,
+            file_name=f"campaign_analysis_report_{report_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            key=f"download_report_{report_id}"
+        )
+        
+        # Show summary statistics
+        st.markdown("### 📊 Summary Statistics")
+        
+        # Calculate summary stats
+        target_regions = [r for r in analysis_df['Region'].tolist() if r != 'Control set']
+        control_regions = [r for r in analysis_df['Region'].tolist() if r == 'Control set']
+        
+        summary_col1, summary_col2, summary_col3 = st.columns(3)
+        
+        with summary_col1:
+            st.metric("Target Regions", len(target_regions))
+            st.metric("Control Regions", len(control_regions))
+        
+        with summary_col2:
+            # Calculate average changes for Base Week 1 vs Campaign
+            base1_changes = []
+            for _, row in analysis_df.iterrows():
+                if row['Sessions_Total_Change1'] != 'N/A' and row['Sessions_Total_Change1'] != '∞':
+                    try:
+                        change_val = float(row['Sessions_Total_Change1'].replace('%', '').replace('+', ''))
+                        base1_changes.append(change_val)
+                    except:
+                        pass
+            
+            if base1_changes:
+                avg_change_base1 = sum(base1_changes) / len(base1_changes)
+                st.metric("Avg Sessions Change (Base1)", f"{avg_change_base1:+.1f}%")
+        
+        with summary_col3:
+            # Calculate average changes for Base Week 2 vs Campaign
+            base2_changes = []
+            for _, row in analysis_df.iterrows():
+                if row['Sessions_Total_Change2'] != 'N/A' and row['Sessions_Total_Change2'] != '∞':
+                    try:
+                        change_val = float(row['Sessions_Total_Change2'].replace('%', '').replace('+', ''))
+                        base2_changes.append(change_val)
+                    except:
+                        pass
+            
+            if base2_changes:
+                avg_change_base2 = sum(base2_changes) / len(base2_changes)
+                st.metric("Avg Sessions Change (Base2)", f"{avg_change_base2:+.1f}%")
+
+def create_csv_export_data(df, base1_label, base2_label, campaign_label):
+    """Create CSV data that matches the exact display format"""
+    
+    # Create the CSV content to match the HTML table format exactly
+    csv_lines = []
+    
+    # First table: Base Week 1 vs Campaign
+    csv_lines.append(f"Base Week 1 ({base1_label}) vs Campaign ({campaign_label}) Comparison")
+    csv_lines.append("")
+    
+    # Headers for first table - matching HTML structure exactly
+    headers1 = [
+        "Region",
+        "Sessions (Total) - Base week",
+        "Sessions (Total) - Campaign", 
+        "Sessions (Total) - %change",
+        "Sessions (Google) - Base week",
+        "Sessions (Google) - Campaign",
+        "Sessions (Google) - %change", 
+        "Net Sales (Total) - Base week",
+        "Net Sales (Total) - Campaign",
+        "Net Sales (Total) - %change"
+    ]
+    csv_lines.append('","'.join([''] + headers1 + ['']))
+    csv_lines[-1] = '"' + csv_lines[-1] + '"'
+    
+    # Data rows for first table - properly escape values with commas
+    for _, row in df.iterrows():
+        data_row1 = [
+            f'"{row["Region"]}"',
+            f'"{row["Sessions_Total_Base1"]:,.0f}"',
+            f'"{row["Sessions_Total_Campaign"]:,.0f}"',
+            f'"{row["Sessions_Total_Change1"]}"',
+            f'"{row["Sessions_Google_Base1"]:,.0f}"',
+            f'"{row["Sessions_Google_Campaign"]:,.0f}"',
+            f'"{row["Sessions_Google_Change1"]}"',
+            f'"${row["Net_Sales_Base1"]:,.0f}"',
+            f'"${row["Net_Sales_Campaign"]:,.0f}"',
+            f'"{row["Net_Sales_Change1"]}"'
+        ]
+        csv_lines.append(','.join(data_row1))
+    
+    # Separator
+    csv_lines.append("")
+    csv_lines.append("")
+    
+    # Second table: Base Week 2 vs Campaign
+    csv_lines.append(f"Base Week 2 ({base2_label}) vs Campaign ({campaign_label}) Comparison")
+    csv_lines.append("")
+    
+    # Headers for second table
+    headers2 = [
+        "Region",
+        "Sessions (Total) - Base week",
+        "Sessions (Total) - Campaign", 
+        "Sessions (Total) - %change",
+        "Sessions (Google) - Base week",
+        "Sessions (Google) - Campaign",
+        "Sessions (Google) - %change", 
+        "Net Sales (Total) - Base week",
+        "Net Sales (Total) - Campaign",
+        "Net Sales (Total) - %change"
+    ]
+    csv_lines.append('","'.join([''] + headers2 + ['']))
+    csv_lines[-1] = '"' + csv_lines[-1] + '"'
+    
+    # Data rows for second table - properly escape values with commas
+    for _, row in df.iterrows():
+        data_row2 = [
+            f'"{row["Region"]}"',
+            f'"{row["Sessions_Total_Base2"]:,.0f}"',
+            f'"{row["Sessions_Total_Campaign"]:,.0f}"',
+            f'"{row["Sessions_Total_Change2"]}"',
+            f'"{row["Sessions_Google_Base2"]:,.0f}"',
+            f'"{row["Sessions_Google_Campaign"]:,.0f}"',
+            f'"{row["Sessions_Google_Change2"]}"',
+            f'"${row["Net_Sales_Base2"]:,.0f}"',
+            f'"${row["Net_Sales_Campaign"]:,.0f}"',
+            f'"{row["Net_Sales_Change2"]}"'
+        ]
+        csv_lines.append(','.join(data_row2))
+    
+    return "\n".join(csv_lines)
+
 def main():
     # Header
     st.markdown('<h1 class="main-header">🚀 Campaign Analysis: DuckDB Optimized</h1>', unsafe_allow_html=True)
+    
+    # Initialize session state for storing multiple reports
+    if 'analysis_reports' not in st.session_state:
+        st.session_state.analysis_reports = []
+    if 'report_counter' not in st.session_state:
+        st.session_state.report_counter = 0
+    
+    # Initialize session state for storing multiple reports
+    if 'analysis_reports' not in st.session_state:
+        st.session_state.analysis_reports = []
+    if 'report_counter' not in st.session_state:
+        st.session_state.report_counter = 0
     
     # Sidebar for file uploads
     st.sidebar.header("📁 Data Upload")
@@ -769,178 +958,37 @@ def main():
                 # Convert to DataFrame
                 analysis_df = pd.DataFrame(results)
                 
-                # Display results
-                st.subheader("📊 Campaign Analysis Results")
+                # Increment report counter and store the report
+                st.session_state.report_counter += 1
+                report_id = st.session_state.report_counter
                 
-                # Format and display HTML table
-                html_table = format_analysis_table_html(analysis_df, base1_label, base2_label, campaign_label)
+                # Store report data in session state
+                report_data = {
+                    'id': report_id,
+                    'timestamp': datetime.now(),
+                    'analysis_df': analysis_df,
+                    'base1_label': base1_label,
+                    'base2_label': base2_label,
+                    'campaign_label': campaign_label,
+                    'config': {
+                        'base_week1_start': base_week1_start,
+                        'base_week1_end': base_week1_end,
+                        'base_week2_start': base_week2_start,
+                        'base_week2_end': base_week2_end,
+                        'campaign_start': campaign_start,
+                        'campaign_end': campaign_end,
+                        'selected_regions': selected_regions,
+                        'control_regions': control_regions,
+                        'google_sources': google_sources,
+                        'region_column': region_column,
+                        'shopify_region_column': shopify_region_column,
+                        'base_week_method': base_week_method
+                    }
+                }
                 
-                # Use st.components.v1.html to properly render the table
-                import streamlit.components.v1 as components
-                components.html(f"""
-                <div style="width: 100%; overflow-x: auto;">
-                    {html_table}
-                </div>
-                """, height=800)
+                st.session_state.analysis_reports.append(report_data)
                 
-                # Summary section
-                st.markdown('<div class="summary-section">', unsafe_allow_html=True)
-                st.subheader("📋 Analysis Summary")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write("**Performance Metrics:**")
-                    st.write(f"✅ Processed {len(ga_data):,} GA records")
-                    st.write(f"✅ Processed {len(shopify_data):,} Shopify records")
-                    st.write("✅ DuckDB optimization enabled")
-                    
-                    st.write("**Control Set Information:**")
-                    if control_regions:
-                        control_list = ", ".join(control_regions)
-                        st.write(f"Control regions: {control_list} ({len(control_regions)} regions)")
-                    else:
-                        st.write("No control regions selected")
-                
-                with col2:
-                    st.write("**Period Information:**")
-                    base1_weeks = calculate_weeks_in_period(base_week1_start, base_week1_end)
-                    base2_weeks = calculate_weeks_in_period(base_week2_start, base_week2_end)
-                    campaign_weeks = calculate_weeks_in_period(campaign_start, campaign_end)
-                    
-                    # Show actual days and calculated weeks
-                    base1_days = (pd.to_datetime(base_week1_end) - pd.to_datetime(base_week1_start)).days + 1
-                    base2_days = (pd.to_datetime(base_week2_end) - pd.to_datetime(base_week2_start)).days + 1
-                    campaign_days = (pd.to_datetime(campaign_end) - pd.to_datetime(campaign_start)).days + 1
-                    
-                    st.write(f"Base week 1: {base1_days} days → {base1_weeks} weeks (always averaged)")
-                    st.write(f"Base week 2: {base2_days} days → {base2_weeks} weeks (always averaged)")
-                    campaign_method = "averaged" if base_week_method == "Average (÷weeks)" else "total"
-                    st.write(f"Campaign: {campaign_days} days → {campaign_weeks} weeks ({campaign_method})")
-                    st.write(f"Google sources: {len(google_sources)} selected")
-                
-                # Debug information
-                st.write("**Configuration Details:**")
-                st.write(f"Using GA region column: '{region_column}'")
-                st.write(f"Using Shopify region column: '{shopify_region_column}'")
-                st.write(f"Target regions: {len(selected_regions)} selected")
-                st.write(f"Control regions: {len(control_regions)} selected")
-                st.write(f"Total result rows: {len(analysis_df)}")
-                
-                if control_regions:
-                    control_base1_total = len(control_regions) * base1_divisor
-                    control_base2_total = len(control_regions) * base2_divisor
-                    control_campaign_total = len(control_regions) * campaign_divisor
-                    st.write(f"Control set divisors:")
-                    st.write(f"  - Base week 1: {len(control_regions)} regions × {base1_divisor} weeks = {control_base1_total}")
-                    st.write(f"  - Base week 2: {len(control_regions)} regions × {base2_divisor} weeks = {control_base2_total}")
-                    st.write(f"  - Campaign: {len(control_regions)} regions × {campaign_divisor} = {control_campaign_total}")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Export functionality
-                st.subheader("📥 Export Results")
-                
-                # Create properly formatted export data matching the display format
-                export_data = []
-                
-                # Add header rows for Base Week 1 vs Campaign comparison
-                export_data.append({
-                    'Region': 'Region',
-                    'Sessions_Total_Base': f'{base1_label}',
-                    'Sessions_Total_Campaign': f'{campaign_label}',
-                    'Sessions_Total_Change': '%change',
-                    'Sessions_Google_Base': f'{base1_label}',
-                    'Sessions_Google_Campaign': f'{campaign_label}',
-                    'Sessions_Google_Change': '%change',
-                    'Net_Sales_Base': f'{base1_label}',
-                    'Net_Sales_Campaign': f'{campaign_label}',
-                    'Net_Sales_Change': '%change'
-                })
-                
-                # Add Base Week 1 vs Campaign data
-                for _, row in analysis_df.iterrows():
-                    export_data.append({
-                        'Region': row['Region'],
-                        'Sessions_Total_Base': f"{row['Sessions_Total_Base1']:,.0f}",
-                        'Sessions_Total_Campaign': f"{row['Sessions_Total_Campaign']:,.0f}",
-                        'Sessions_Total_Change': row['Sessions_Total_Change1'],
-                        'Sessions_Google_Base': f"{row['Sessions_Google_Base1']:,.0f}",
-                        'Sessions_Google_Campaign': f"{row['Sessions_Google_Campaign']:,.0f}",
-                        'Sessions_Google_Change': row['Sessions_Google_Change1'],
-                        'Net_Sales_Base': f"${row['Net_Sales_Base1']:,.0f}",
-                        'Net_Sales_Campaign': f"${row['Net_Sales_Campaign']:,.0f}",
-                        'Net_Sales_Change': row['Net_Sales_Change1']
-                    })
-                
-                # Add separator row
-                export_data.append({
-                    'Region': '',
-                    'Sessions_Total_Base': '',
-                    'Sessions_Total_Campaign': '',
-                    'Sessions_Total_Change': '',
-                    'Sessions_Google_Base': '',
-                    'Sessions_Google_Campaign': '',
-                    'Sessions_Google_Change': '',
-                    'Net_Sales_Base': '',
-                    'Net_Sales_Campaign': '',
-                    'Net_Sales_Change': ''
-                })
-                
-                # Add header rows for Base Week 2 vs Campaign comparison
-                export_data.append({
-                    'Region': 'Region',
-                    'Sessions_Total_Base': f'{base2_label}',
-                    'Sessions_Total_Campaign': f'{campaign_label}',
-                    'Sessions_Total_Change': '%change',
-                    'Sessions_Google_Base': f'{base2_label}',
-                    'Sessions_Google_Campaign': f'{campaign_label}',
-                    'Sessions_Google_Change': '%change',
-                    'Net_Sales_Base': f'{base2_label}',
-                    'Net_Sales_Campaign': f'{campaign_label}',
-                    'Net_Sales_Change': '%change'
-                })
-                
-                # Add Base Week 2 vs Campaign data
-                for _, row in analysis_df.iterrows():
-                    export_data.append({
-                        'Region': row['Region'],
-                        'Sessions_Total_Base': f"{row['Sessions_Total_Base2']:,.0f}",
-                        'Sessions_Total_Campaign': f"{row['Sessions_Total_Campaign']:,.0f}",
-                        'Sessions_Total_Change': row['Sessions_Total_Change2'],
-                        'Sessions_Google_Base': f"{row['Sessions_Google_Base2']:,.0f}",
-                        'Sessions_Google_Campaign': f"{row['Sessions_Google_Campaign']:,.0f}",
-                        'Sessions_Google_Change': row['Sessions_Google_Change2'],
-                        'Net_Sales_Base': f"${row['Net_Sales_Base2']:,.0f}",
-                        'Net_Sales_Campaign': f"${row['Net_Sales_Campaign']:,.0f}",
-                        'Net_Sales_Change': row['Net_Sales_Change2']
-                    })
-                
-                # Convert to DataFrame and then CSV
-                export_df = pd.DataFrame(export_data)
-                
-                # Rename columns to match the display format
-                export_df.columns = [
-                    'Region',
-                    'Sessions (Total) - Base',
-                    'Sessions (Total) - Campaign', 
-                    'Sessions (Total) - %change',
-                    'Sessions (Google) - Base',
-                    'Sessions (Google) - Campaign',
-                    'Sessions (Google) - %change',
-                    'Net Sales (Total) - Base',
-                    'Net Sales (Total) - Campaign',
-                    'Net Sales (Total) - %change'
-                ]
-                
-                csv_data = export_df.to_csv(index=False)
-                st.download_button(
-                    label="📊 Download Analysis Results (CSV)",
-                    data=csv_data,
-                    file_name=f"campaign_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+                st.success(f"✅ Analysis Report #{report_id} generated successfully!")
                 
             except Exception as e:
                 st.error(f"Error generating analysis: {str(e)}")
@@ -948,6 +996,24 @@ def main():
                 # Show detailed error for debugging
                 import traceback
                 st.code(traceback.format_exc())
+    
+    # Add button to generate another analysis
+    if len(st.session_state.analysis_reports) > 0:
+        st.sidebar.markdown("---")
+        if st.sidebar.button("📊 Generate Another Analysis", type="secondary"):
+            st.sidebar.success("Configure new analysis parameters above and click 'Generate Analysis'")
+    
+    # Display all generated reports
+    if len(st.session_state.analysis_reports) > 0:
+        st.markdown("---")
+        st.header("📋 Generated Analysis Reports")
+        
+        # Show reports in reverse order (newest first)
+        for report in reversed(st.session_state.analysis_reports):
+            display_report(report)
+    
+    else:
+        st.info("No analysis reports generated yet. Configure your analysis parameters and click 'Generate Analysis' to create your first report.")
     
     # Data preview
     with st.expander("👀 Data Preview"):
