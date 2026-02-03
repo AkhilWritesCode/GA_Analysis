@@ -9,7 +9,7 @@ import os
 
 # Page configuration
 st.set_page_config(
-    page_title="Campaign Analysis - Final Version",
+    page_title="Campaign Analysis - Single Base Week",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -124,7 +124,7 @@ def calculate_percentage_change(base_value, campaign_value):
     return f"{change:+.1f}%"
 
 def create_analysis_with_duckdb(ga_data, shopify_data, regions, 
-                               base_week1_start, base_week1_end, base_week2_start, base_week2_end,
+                               base_week_start, base_week_end,
                                campaign_start, campaign_end, control_regions, google_sources, 
                                base_week_method, region_column, shopify_region_column):
     """Create analysis using DuckDB for faster processing"""
@@ -138,14 +138,12 @@ def create_analysis_with_duckdb(ga_data, shopify_data, regions,
         conn.register('shopify_data', shopify_data)
         
         # Calculate weeks for averaging (always rounded to nearest whole number)
-        base_week1_weeks = calculate_weeks_in_period(base_week1_start, base_week1_end)
-        base_week2_weeks = calculate_weeks_in_period(base_week2_start, base_week2_end)
+        base_week_weeks = calculate_weeks_in_period(base_week_start, base_week_end)
         campaign_weeks = calculate_weeks_in_period(campaign_start, campaign_end)
         
         # Base weeks are ALWAYS averaged (divided by number of weeks)
         # Campaign can be averaged or summed based on user preference
-        base1_divisor = base_week1_weeks  # Always divide base week 1 by its weeks
-        base2_divisor = base_week2_weeks  # Always divide base week 2 by its weeks
+        base_divisor = base_week_weeks  # Always divide base week by its weeks
         campaign_divisor = campaign_weeks if base_week_method == "Average (÷weeks)" else 1
         
         # Create Google sources filter
@@ -158,26 +156,15 @@ def create_analysis_with_duckdb(ga_data, shopify_data, regions,
         target_regions = [r for r in regions if r not in control_regions]
         
         for region in target_regions:
-            # GA Base Week 1 query
-            ga_base1_query = f"""
+            # GA Base Week query
+            ga_base_query = f"""
             SELECT 
                 SUM(Sessions) as total_sessions,
                 SUM(CASE WHEN {google_filter} THEN Sessions ELSE 0 END) as google_sessions
             FROM ga_data 
             WHERE "{region_column}" = '{region}' 
-            AND Date >= '{base_week1_start}' 
-            AND Date <= '{base_week1_end}'
-            """
-            
-            # GA Base Week 2 query
-            ga_base2_query = f"""
-            SELECT 
-                SUM(Sessions) as total_sessions,
-                SUM(CASE WHEN {google_filter} THEN Sessions ELSE 0 END) as google_sessions
-            FROM ga_data 
-            WHERE "{region_column}" = '{region}' 
-            AND Date >= '{base_week2_start}' 
-            AND Date <= '{base_week2_end}'
+            AND Date >= '{base_week_start}' 
+            AND Date <= '{base_week_end}'
             """
             
             # GA Campaign query
@@ -192,20 +179,12 @@ def create_analysis_with_duckdb(ga_data, shopify_data, regions,
             """
             
             # Shopify queries
-            shopify_base1_query = f"""
+            shopify_base_query = f"""
             SELECT SUM("Net sales") as net_sales
             FROM shopify_data 
             WHERE "{shopify_region_column}" = '{region}' 
-            AND Day >= '{base_week1_start}' 
-            AND Day <= '{base_week1_end}'
-            """
-            
-            shopify_base2_query = f"""
-            SELECT SUM("Net sales") as net_sales
-            FROM shopify_data 
-            WHERE "{shopify_region_column}" = '{region}' 
-            AND Day >= '{base_week2_start}' 
-            AND Day <= '{base_week2_end}'
+            AND Day >= '{base_week_start}' 
+            AND Day <= '{base_week_end}'
             """
             
             shopify_campaign_query = f"""
@@ -217,64 +196,50 @@ def create_analysis_with_duckdb(ga_data, shopify_data, regions,
             """
             
             # Execute queries
-            ga_base1_result = conn.execute(ga_base1_query).fetchone()
-            ga_base2_result = conn.execute(ga_base2_query).fetchone()
+            ga_base_result = conn.execute(ga_base_query).fetchone()
             ga_campaign_result = conn.execute(ga_campaign_query).fetchone()
             
-            shopify_base1_result = conn.execute(shopify_base1_query).fetchone()
-            shopify_base2_result = conn.execute(shopify_base2_query).fetchone()
+            shopify_base_result = conn.execute(shopify_base_query).fetchone()
             shopify_campaign_result = conn.execute(shopify_campaign_query).fetchone()
             
             # Calculate metrics with proper divisors (base weeks always averaged)
-            sessions_total_base1 = (ga_base1_result[0] or 0) / base1_divisor
-            sessions_total_base2 = (ga_base2_result[0] or 0) / base2_divisor
+            sessions_total_base = (ga_base_result[0] or 0) / base_divisor
             sessions_total_campaign = (ga_campaign_result[0] or 0) / campaign_divisor
             
-            sessions_google_base1 = (ga_base1_result[1] or 0) / base1_divisor
-            sessions_google_base2 = (ga_base2_result[1] or 0) / base2_divisor
+            sessions_google_base = (ga_base_result[1] or 0) / base_divisor
             sessions_google_campaign = (ga_campaign_result[1] or 0) / campaign_divisor
             
-            net_sales_base1 = (shopify_base1_result[0] or 0) / base1_divisor
-            net_sales_base2 = (shopify_base2_result[0] or 0) / base2_divisor
+            net_sales_base = (shopify_base_result[0] or 0) / base_divisor
             net_sales_campaign = (shopify_campaign_result[0] or 0) / campaign_divisor
             
             # Calculate percentage changes
-            sessions_total_change1 = calculate_percentage_change(sessions_total_base1, sessions_total_campaign)
-            sessions_total_change2 = calculate_percentage_change(sessions_total_base2, sessions_total_campaign)
-            sessions_google_change1 = calculate_percentage_change(sessions_google_base1, sessions_google_campaign)
-            sessions_google_change2 = calculate_percentage_change(sessions_google_base2, sessions_google_campaign)
-            net_sales_change1 = calculate_percentage_change(net_sales_base1, net_sales_campaign)
-            net_sales_change2 = calculate_percentage_change(net_sales_base2, net_sales_campaign)
+            sessions_total_change = calculate_percentage_change(sessions_total_base, sessions_total_campaign)
+            sessions_google_change = calculate_percentage_change(sessions_google_base, sessions_google_campaign)
+            net_sales_change = calculate_percentage_change(net_sales_base, net_sales_campaign)
             
             results.append({
                 'Region': region,
-                'Sessions_Total_Base1': sessions_total_base1,
-                'Sessions_Total_Base2': sessions_total_base2,
+                'Sessions_Total_Base': sessions_total_base,
                 'Sessions_Total_Campaign': sessions_total_campaign,
-                'Sessions_Total_Change1': sessions_total_change1,
-                'Sessions_Total_Change2': sessions_total_change2,
-                'Sessions_Google_Base1': sessions_google_base1,
-                'Sessions_Google_Base2': sessions_google_base2,
+                'Sessions_Total_Change': sessions_total_change,
+                'Sessions_Google_Base': sessions_google_base,
                 'Sessions_Google_Campaign': sessions_google_campaign,
-                'Sessions_Google_Change1': sessions_google_change1,
-                'Sessions_Google_Change2': sessions_google_change2,
-                'Net_Sales_Base1': net_sales_base1,
-                'Net_Sales_Base2': net_sales_base2,
+                'Sessions_Google_Change': sessions_google_change,
+                'Net_Sales_Base': net_sales_base,
                 'Net_Sales_Campaign': net_sales_campaign,
-                'Net_Sales_Change1': net_sales_change1,
-                'Net_Sales_Change2': net_sales_change2
+                'Net_Sales_Change': net_sales_change
             })
         
-        return results, base1_divisor, base2_divisor, campaign_divisor, conn
+        return results, base_divisor, campaign_divisor, conn
         
     except Exception as e:
         conn.close()
         raise e
 
 def process_control_regions_duckdb(conn, control_regions, google_sources, 
-                                  base_week1_start, base_week1_end, base_week2_start, base_week2_end,
+                                  base_week_start, base_week_end,
                                   campaign_start, campaign_end, region_column, shopify_region_column,
-                                  base1_divisor, base2_divisor, campaign_divisor):
+                                  base_divisor, campaign_divisor):
     """Process control regions using DuckDB aggregation"""
     
     if not control_regions:
@@ -292,11 +257,9 @@ def process_control_regions_duckdb(conn, control_regions, google_sources,
     # Aggregate GA data for control regions
     ga_control_query = f"""
     SELECT 
-        SUM(CASE WHEN Date >= '{base_week1_start}' AND Date <= '{base_week1_end}' THEN Sessions ELSE 0 END) as sessions_base1,
-        SUM(CASE WHEN Date >= '{base_week2_start}' AND Date <= '{base_week2_end}' THEN Sessions ELSE 0 END) as sessions_base2,
+        SUM(CASE WHEN Date >= '{base_week_start}' AND Date <= '{base_week_end}' THEN Sessions ELSE 0 END) as sessions_base,
         SUM(CASE WHEN Date >= '{campaign_start}' AND Date <= '{campaign_end}' THEN Sessions ELSE 0 END) as sessions_campaign,
-        SUM(CASE WHEN Date >= '{base_week1_start}' AND Date <= '{base_week1_end}' AND {google_filter} THEN Sessions ELSE 0 END) as google_sessions_base1,
-        SUM(CASE WHEN Date >= '{base_week2_start}' AND Date <= '{base_week2_end}' AND {google_filter} THEN Sessions ELSE 0 END) as google_sessions_base2,
+        SUM(CASE WHEN Date >= '{base_week_start}' AND Date <= '{base_week_end}' AND {google_filter} THEN Sessions ELSE 0 END) as google_sessions_base,
         SUM(CASE WHEN Date >= '{campaign_start}' AND Date <= '{campaign_end}' AND {google_filter} THEN Sessions ELSE 0 END) as google_sessions_campaign
     FROM ga_data 
     WHERE {control_filter}
@@ -305,8 +268,7 @@ def process_control_regions_duckdb(conn, control_regions, google_sources,
     # Aggregate Shopify data for control regions
     shopify_control_query = f"""
     SELECT 
-        SUM(CASE WHEN Day >= '{base_week1_start}' AND Day <= '{base_week1_end}' THEN "Net sales" ELSE 0 END) as sales_base1,
-        SUM(CASE WHEN Day >= '{base_week2_start}' AND Day <= '{base_week2_end}' THEN "Net sales" ELSE 0 END) as sales_base2,
+        SUM(CASE WHEN Day >= '{base_week_start}' AND Day <= '{base_week_end}' THEN "Net sales" ELSE 0 END) as sales_base,
         SUM(CASE WHEN Day >= '{campaign_start}' AND Day <= '{campaign_end}' THEN "Net sales" ELSE 0 END) as sales_campaign
     FROM shopify_data 
     WHERE {shopify_control_filter}
@@ -320,88 +282,63 @@ def process_control_regions_duckdb(conn, control_regions, google_sources,
     control_region_count = len(control_regions)
     
     # Apply control region and week divisors (base weeks always averaged)
-    sessions_total_base1 = (ga_control_result[0] or 0) / (control_region_count * base1_divisor)
-    sessions_total_base2 = (ga_control_result[1] or 0) / (control_region_count * base2_divisor)
-    sessions_total_campaign = (ga_control_result[2] or 0) / (control_region_count * campaign_divisor)
+    sessions_total_base = (ga_control_result[0] or 0) / (control_region_count * base_divisor)
+    sessions_total_campaign = (ga_control_result[1] or 0) / (control_region_count * campaign_divisor)
     
-    sessions_google_base1 = (ga_control_result[3] or 0) / (control_region_count * base1_divisor)
-    sessions_google_base2 = (ga_control_result[4] or 0) / (control_region_count * base2_divisor)
-    sessions_google_campaign = (ga_control_result[5] or 0) / (control_region_count * campaign_divisor)
+    sessions_google_base = (ga_control_result[2] or 0) / (control_region_count * base_divisor)
+    sessions_google_campaign = (ga_control_result[3] or 0) / (control_region_count * campaign_divisor)
     
-    net_sales_base1 = (shopify_control_result[0] or 0) / (control_region_count * base1_divisor)
-    net_sales_base2 = (shopify_control_result[1] or 0) / (control_region_count * base2_divisor)
-    net_sales_campaign = (shopify_control_result[2] or 0) / (control_region_count * campaign_divisor)
+    net_sales_base = (shopify_control_result[0] or 0) / (control_region_count * base_divisor)
+    net_sales_campaign = (shopify_control_result[1] or 0) / (control_region_count * campaign_divisor)
     
     # Calculate percentage changes
-    sessions_total_change1 = calculate_percentage_change(sessions_total_base1, sessions_total_campaign)
-    sessions_total_change2 = calculate_percentage_change(sessions_total_base2, sessions_total_campaign)
-    sessions_google_change1 = calculate_percentage_change(sessions_google_base1, sessions_google_campaign)
-    sessions_google_change2 = calculate_percentage_change(sessions_google_base2, sessions_google_campaign)
-    net_sales_change1 = calculate_percentage_change(net_sales_base1, net_sales_campaign)
-    net_sales_change2 = calculate_percentage_change(net_sales_base2, net_sales_campaign)
+    sessions_total_change = calculate_percentage_change(sessions_total_base, sessions_total_campaign)
+    sessions_google_change = calculate_percentage_change(sessions_google_base, sessions_google_campaign)
+    net_sales_change = calculate_percentage_change(net_sales_base, net_sales_campaign)
     
     return {
         'Region': 'Control set',
-        'Sessions_Total_Base1': sessions_total_base1,
-        'Sessions_Total_Base2': sessions_total_base2,
+        'Sessions_Total_Base': sessions_total_base,
         'Sessions_Total_Campaign': sessions_total_campaign,
-        'Sessions_Total_Change1': sessions_total_change1,
-        'Sessions_Total_Change2': sessions_total_change2,
-        'Sessions_Google_Base1': sessions_google_base1,
-        'Sessions_Google_Base2': sessions_google_base2,
+        'Sessions_Total_Change': sessions_total_change,
+        'Sessions_Google_Base': sessions_google_base,
         'Sessions_Google_Campaign': sessions_google_campaign,
-        'Sessions_Google_Change1': sessions_google_change1,
-        'Sessions_Google_Change2': sessions_google_change2,
-        'Net_Sales_Base1': net_sales_base1,
-        'Net_Sales_Base2': net_sales_base2,
+        'Sessions_Google_Change': sessions_google_change,
+        'Net_Sales_Base': net_sales_base,
         'Net_Sales_Campaign': net_sales_campaign,
-        'Net_Sales_Change1': net_sales_change1,
-        'Net_Sales_Change2': net_sales_change2
+        'Net_Sales_Change': net_sales_change
     }
 
-def create_display_dataframes(analysis_df, base1_label, base2_label, campaign_label):
-    """Create formatted dataframes for display"""
+def create_display_dataframe(analysis_df, base_label, campaign_label):
+    """Create formatted dataframe for display"""
     
-    # Create Base Week 1 vs Campaign comparison
-    df1 = pd.DataFrame()
-    df1['Region'] = analysis_df['Region']
-    df1[f'Sessions Total - {base1_label}'] = analysis_df['Sessions_Total_Base1'].apply(lambda x: f"{x:,.0f}")
-    df1[f'Sessions Total - {campaign_label}'] = analysis_df['Sessions_Total_Campaign'].apply(lambda x: f"{x:,.0f}")
-    df1['Sessions Total - %Change'] = analysis_df['Sessions_Total_Change1']
-    df1[f'Sessions Google - {base1_label}'] = analysis_df['Sessions_Google_Base1'].apply(lambda x: f"{x:,.0f}")
-    df1[f'Sessions Google - {campaign_label}'] = analysis_df['Sessions_Google_Campaign'].apply(lambda x: f"{x:,.0f}")
-    df1['Sessions Google - %Change'] = analysis_df['Sessions_Google_Change1']
-    df1[f'Net Sales - {base1_label}'] = analysis_df['Net_Sales_Base1'].apply(lambda x: f"${x:,.0f}")
-    df1[f'Net Sales - {campaign_label}'] = analysis_df['Net_Sales_Campaign'].apply(lambda x: f"${x:,.0f}")
-    df1['Net Sales - %Change'] = analysis_df['Net_Sales_Change1']
+    # Create comparison dataframe
+    df = pd.DataFrame()
+    df['Region'] = analysis_df['Region']
+    df[f'Sessions Total - {base_label}'] = analysis_df['Sessions_Total_Base'].apply(lambda x: f"{x:,.0f}")
+    df[f'Sessions Total - {campaign_label}'] = analysis_df['Sessions_Total_Campaign'].apply(lambda x: f"{x:,.0f}")
+    df['Sessions Total - %Change'] = analysis_df['Sessions_Total_Change']
+    df[f'Sessions Google - {base_label}'] = analysis_df['Sessions_Google_Base'].apply(lambda x: f"{x:,.0f}")
+    df[f'Sessions Google - {campaign_label}'] = analysis_df['Sessions_Google_Campaign'].apply(lambda x: f"{x:,.0f}")
+    df['Sessions Google - %Change'] = analysis_df['Sessions_Google_Change']
+    df[f'Net Sales - {base_label}'] = analysis_df['Net_Sales_Base'].apply(lambda x: f"${x:,.0f}")
+    df[f'Net Sales - {campaign_label}'] = analysis_df['Net_Sales_Campaign'].apply(lambda x: f"${x:,.0f}")
+    df['Net Sales - %Change'] = analysis_df['Net_Sales_Change']
     
-    # Create Base Week 2 vs Campaign comparison
-    df2 = pd.DataFrame()
-    df2['Region'] = analysis_df['Region']
-    df2[f'Sessions Total - {base2_label}'] = analysis_df['Sessions_Total_Base2'].apply(lambda x: f"{x:,.0f}")
-    df2[f'Sessions Total - {campaign_label}'] = analysis_df['Sessions_Total_Campaign'].apply(lambda x: f"{x:,.0f}")
-    df2['Sessions Total - %Change'] = analysis_df['Sessions_Total_Change2']
-    df2[f'Sessions Google - {base2_label}'] = analysis_df['Sessions_Google_Base2'].apply(lambda x: f"{x:,.0f}")
-    df2[f'Sessions Google - {campaign_label}'] = analysis_df['Sessions_Google_Campaign'].apply(lambda x: f"{x:,.0f}")
-    df2['Sessions Google - %Change'] = analysis_df['Sessions_Google_Change2']
-    df2[f'Net Sales - {base2_label}'] = analysis_df['Net_Sales_Base2'].apply(lambda x: f"${x:,.0f}")
-    df2[f'Net Sales - {campaign_label}'] = analysis_df['Net_Sales_Campaign'].apply(lambda x: f"${x:,.0f}")
-    df2['Net Sales - %Change'] = analysis_df['Net_Sales_Change2']
-    
-    return df1, df2
+    return df
 
-def create_csv_export_data(df, base1_label, base2_label, campaign_label):
+def create_csv_export_data(df, base_label, campaign_label):
     """Create CSV data that matches the exact display format"""
     
     # Create the CSV content to match the dataframe format exactly
     csv_lines = []
     
-    # First table: Base Week 1 vs Campaign
-    csv_lines.append(f"Base Week 1 ({base1_label}) vs Campaign ({campaign_label}) Comparison")
+    # Table: Base Week vs Campaign
+    csv_lines.append(f"Base Week ({base_label}) vs Campaign ({campaign_label}) Comparison")
     csv_lines.append("")
     
-    # Headers for first table
-    headers1 = [
+    # Headers
+    headers = [
         "Region",
         "Sessions (Total) - Base week",
         "Sessions (Total) - Campaign", 
@@ -413,62 +350,23 @@ def create_csv_export_data(df, base1_label, base2_label, campaign_label):
         "Net Sales (Total) - Campaign",
         "Net Sales (Total) - %change"
     ]
-    csv_lines.append(','.join([f'"{h}"' for h in headers1]))
+    csv_lines.append(','.join([f'"{h}"' for h in headers]))
     
-    # Data rows for first table
+    # Data rows
     for _, row in df.iterrows():
-        data_row1 = [
+        data_row = [
             f'"{row["Region"]}"',
-            f'"{row["Sessions_Total_Base1"]:,.0f}"',
+            f'"{row["Sessions_Total_Base"]:,.0f}"',
             f'"{row["Sessions_Total_Campaign"]:,.0f}"',
-            f'"{row["Sessions_Total_Change1"]}"',
-            f'"{row["Sessions_Google_Base1"]:,.0f}"',
+            f'"{row["Sessions_Total_Change"]}"',
+            f'"{row["Sessions_Google_Base"]:,.0f}"',
             f'"{row["Sessions_Google_Campaign"]:,.0f}"',
-            f'"{row["Sessions_Google_Change1"]}"',
-            f'"${row["Net_Sales_Base1"]:,.0f}"',
+            f'"{row["Sessions_Google_Change"]}"',
+            f'"${row["Net_Sales_Base"]:,.0f}"',
             f'"${row["Net_Sales_Campaign"]:,.0f}"',
-            f'"{row["Net_Sales_Change1"]}"'
+            f'"{row["Net_Sales_Change"]}"'
         ]
-        csv_lines.append(','.join(data_row1))
-    
-    # Separator
-    csv_lines.append("")
-    csv_lines.append("")
-    
-    # Second table: Base Week 2 vs Campaign
-    csv_lines.append(f"Base Week 2 ({base2_label}) vs Campaign ({campaign_label}) Comparison")
-    csv_lines.append("")
-    
-    # Headers for second table
-    headers2 = [
-        "Region",
-        "Sessions (Total) - Base week",
-        "Sessions (Total) - Campaign", 
-        "Sessions (Total) - %change",
-        "Sessions (Google) - Base week",
-        "Sessions (Google) - Campaign",
-        "Sessions (Google) - %change", 
-        "Net Sales (Total) - Base week",
-        "Net Sales (Total) - Campaign",
-        "Net Sales (Total) - %change"
-    ]
-    csv_lines.append(','.join([f'"{h}"' for h in headers2]))
-    
-    # Data rows for second table
-    for _, row in df.iterrows():
-        data_row2 = [
-            f'"{row["Region"]}"',
-            f'"{row["Sessions_Total_Base2"]:,.0f}"',
-            f'"{row["Sessions_Total_Campaign"]:,.0f}"',
-            f'"{row["Sessions_Total_Change2"]}"',
-            f'"{row["Sessions_Google_Base2"]:,.0f}"',
-            f'"{row["Sessions_Google_Campaign"]:,.0f}"',
-            f'"{row["Sessions_Google_Change2"]}"',
-            f'"${row["Net_Sales_Base2"]:,.0f}"',
-            f'"${row["Net_Sales_Campaign"]:,.0f}"',
-            f'"{row["Net_Sales_Change2"]}"'
-        ]
-        csv_lines.append(','.join(data_row2))
+        csv_lines.append(','.join(data_row))
     
     return "\n".join(csv_lines)
 
@@ -551,43 +449,26 @@ def render_analysis_section(ga_data, shopify_data, section_id):
     
     st.write(f"**Available Date Range:** {min_date} to {max_date}")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.write("**Base Week 1:**")
-        base_week1_start = st.date_input(
-            "Base Week 1 Start", 
+        st.write("**Base Week:**")
+        base_week_start = st.date_input(
+            "Base Week Start", 
             value=min_date, 
             min_value=min_date, 
             max_value=max_date,
-            key=f"base1_start_{section_id}"
+            key=f"base_start_{section_id}"
         )
-        base_week1_end = st.date_input(
-            "Base Week 1 End", 
+        base_week_end = st.date_input(
+            "Base Week End", 
             value=min_date + timedelta(days=20), 
             min_value=min_date, 
             max_value=max_date,
-            key=f"base1_end_{section_id}"
+            key=f"base_end_{section_id}"
         )
     
     with col2:
-        st.write("**Base Week 2:**")
-        base_week2_start = st.date_input(
-            "Base Week 2 Start", 
-            value=min_date + timedelta(days=365), 
-            min_value=min_date, 
-            max_value=max_date,
-            key=f"base2_start_{section_id}"
-        )
-        base_week2_end = st.date_input(
-            "Base Week 2 End", 
-            value=min_date + timedelta(days=385), 
-            min_value=min_date, 
-            max_value=max_date,
-            key=f"base2_end_{section_id}"
-        )
-    
-    with col3:
         st.write("**Campaign Period:**")
         campaign_start = st.date_input(
             "Campaign Start", 
@@ -605,11 +486,8 @@ def render_analysis_section(ga_data, shopify_data, section_id):
         )
     
     # Validation
-    if base_week1_start > base_week1_end:
-        st.error("Base week 1 start date must be before end date")
-        return
-    if base_week2_start > base_week2_end:
-        st.error("Base week 2 start date must be before end date")
+    if base_week_start > base_week_end:
+        st.error("Base week start date must be before end date")
         return
     if campaign_start > campaign_end:
         st.error("Campaign start date must be before end date")
@@ -618,34 +496,27 @@ def render_analysis_section(ga_data, shopify_data, section_id):
     # Show week calculations
     st.subheader("📊 Week Calculations")
     
-    base1_weeks = calculate_weeks_in_period(base_week1_start, base_week1_end)
-    base2_weeks = calculate_weeks_in_period(base_week2_start, base_week2_end)
+    base_weeks = calculate_weeks_in_period(base_week_start, base_week_end)
     campaign_weeks_calc = calculate_weeks_in_period(campaign_start, campaign_end)
     
-    calc_col1, calc_col2, calc_col3 = st.columns(3)
+    calc_col1, calc_col2 = st.columns(2)
     
     with calc_col1:
-        base1_days = (base_week1_end - base_week1_start).days + 1
-        st.write(f"**Base Week 1:** {base1_days} days → {base1_weeks} weeks (averaged)")
+        base_days = (base_week_end - base_week_start).days + 1
+        st.write(f"**Base Week:** {base_days} days → {base_weeks} weeks (averaged)")
     
     with calc_col2:
-        base2_days = (base_week2_end - base_week2_start).days + 1
-        st.write(f"**Base Week 2:** {base2_days} days → {base2_weeks} weeks (averaged)")
-    
-    with calc_col3:
         campaign_days = (campaign_end - campaign_start).days + 1
         campaign_method = "averaged" if base_week_method == "Average (÷weeks)" else "total"
         st.write(f"**Campaign:** {campaign_days} days → {campaign_weeks_calc} weeks ({campaign_method})")
     
     # Labels
     st.subheader("🏷️ Period Labels")
-    label_col1, label_col2, label_col3 = st.columns(3)
+    label_col1, label_col2 = st.columns(2)
     
     with label_col1:
-        base1_label = st.text_input("Base Week 1 Label", value="Base week 25", key=f"base1_label_{section_id}")
+        base_label = st.text_input("Base Week Label", value="Base week", key=f"base_label_{section_id}")
     with label_col2:
-        base2_label = st.text_input("Base Week 2 Label", value="Base week 26", key=f"base2_label_{section_id}")
-    with label_col3:
         campaign_label = st.text_input("Campaign Label", value="Campaign - Week 1", key=f"campaign_label_{section_id}")
     
     # Region selection
@@ -711,10 +582,9 @@ def render_analysis_section(ga_data, shopify_data, section_id):
         with st.spinner("Generating analysis..."):
             try:
                 # Create analysis using DuckDB
-                results, base1_divisor, base2_divisor, campaign_divisor, conn = create_analysis_with_duckdb(
+                results, base_divisor, campaign_divisor, conn = create_analysis_with_duckdb(
                     ga_data, shopify_data, selected_regions,
-                    base_week1_start, base_week1_end, 
-                    base_week2_start, base_week2_end,
+                    base_week_start, base_week_end,
                     campaign_start, campaign_end, 
                     control_regions, google_sources, 
                     base_week_method, region_column, 
@@ -725,11 +595,10 @@ def render_analysis_section(ga_data, shopify_data, section_id):
                 if control_regions:
                     control_result = process_control_regions_duckdb(
                         conn, control_regions, google_sources,
-                        base_week1_start, base_week1_end, 
-                        base_week2_start, base_week2_end,
+                        base_week_start, base_week_end,
                         campaign_start, campaign_end, 
                         region_column, shopify_region_column,
-                        base1_divisor, base2_divisor, campaign_divisor
+                        base_divisor, campaign_divisor
                     )
                     if control_result:
                         results.append(control_result)
@@ -749,14 +618,11 @@ def render_analysis_section(ga_data, shopify_data, section_id):
                         'shopify_region_column': shopify_region_column,
                         'google_sources': google_sources,
                         'base_week_method': base_week_method,
-                        'base_week1_start': base_week1_start,
-                        'base_week1_end': base_week1_end,
-                        'base_week2_start': base_week2_start,
-                        'base_week2_end': base_week2_end,
+                        'base_week_start': base_week_start,
+                        'base_week_end': base_week_end,
                         'campaign_start': campaign_start,
                         'campaign_end': campaign_end,
-                        'base1_label': base1_label,
-                        'base2_label': base2_label,
+                        'base_label': base_label,
                         'campaign_label': campaign_label,
                         'selected_regions': selected_regions,
                         'control_regions': control_regions
@@ -792,8 +658,7 @@ def render_analysis_section(ga_data, shopify_data, section_id):
         
         with col1:
             st.write("**📅 Period Configuration:**")
-            st.write(f"• Base Week 1: {config['base_week1_start']} to {config['base_week1_end']}")
-            st.write(f"• Base Week 2: {config['base_week2_start']} to {config['base_week2_end']}")
+            st.write(f"• Base Week: {config['base_week_start']} to {config['base_week_end']}")
             st.write(f"• Campaign: {config['campaign_start']} to {config['campaign_end']}")
             
         with col2:
@@ -804,18 +669,15 @@ def render_analysis_section(ga_data, shopify_data, section_id):
             st.write(f"• Google Sources: {len(config['google_sources'])} selected")
             st.write(f"• Method: {config['base_week_method']}")
         
-        # Create display dataframes
-        df1, df2 = create_display_dataframes(analysis_df, config['base1_label'], config['base2_label'], config['campaign_label'])
+        # Create display dataframe
+        display_df = create_display_dataframe(analysis_df, config['base_label'], config['campaign_label'])
         
-        # Display tables
-        st.subheader(f"📊 {config['base1_label']} vs {config['campaign_label']} Comparison")
-        st.dataframe(df1, use_container_width=True)
-        
-        st.subheader(f"📊 {config['base2_label']} vs {config['campaign_label']} Comparison")
-        st.dataframe(df2, use_container_width=True)
+        # Display table
+        st.subheader(f"📊 {config['base_label']} vs {config['campaign_label']} Comparison")
+        st.dataframe(display_df, use_container_width=True)
         
         # Create CSV data for download
-        csv_data = create_csv_export_data(analysis_df, config['base1_label'], config['base2_label'], config['campaign_label'])
+        csv_data = create_csv_export_data(analysis_df, config['base_label'], config['campaign_label'])
         
         # Download button
         st.download_button(
@@ -825,53 +687,10 @@ def render_analysis_section(ga_data, shopify_data, section_id):
             mime="text/csv",
             key=f"download_report_{section_id}"
         )
-        
-        # Show summary statistics
-        st.markdown("### 📊 Summary Statistics")
-        
-        # Calculate summary stats
-        target_regions = [r for r in analysis_df['Region'].tolist() if r != 'Control set']
-        control_regions_list = [r for r in analysis_df['Region'].tolist() if r == 'Control set']
-        
-        summary_col1, summary_col2, summary_col3 = st.columns(3)
-        
-        with summary_col1:
-            st.metric("Target Regions", len(target_regions))
-            st.metric("Control Regions", len(control_regions_list))
-        
-        with summary_col2:
-            # Calculate average changes for Base Week 1 vs Campaign
-            base1_changes = []
-            for _, row in analysis_df.iterrows():
-                if row['Sessions_Total_Change1'] != 'N/A' and row['Sessions_Total_Change1'] != '∞':
-                    try:
-                        change_val = float(row['Sessions_Total_Change1'].replace('%', '').replace('+', ''))
-                        base1_changes.append(change_val)
-                    except:
-                        pass
-            
-            if base1_changes:
-                avg_change_base1 = sum(base1_changes) / len(base1_changes)
-                st.metric("Avg Sessions Change (Base1)", f"{avg_change_base1:+.1f}%")
-        
-        with summary_col3:
-            # Calculate average changes for Base Week 2 vs Campaign
-            base2_changes = []
-            for _, row in analysis_df.iterrows():
-                if row['Sessions_Total_Change2'] != 'N/A' and row['Sessions_Total_Change2'] != '∞':
-                    try:
-                        change_val = float(row['Sessions_Total_Change2'].replace('%', '').replace('+', ''))
-                        base2_changes.append(change_val)
-                    except:
-                        pass
-            
-            if base2_changes:
-                avg_change_base2 = sum(base2_changes) / len(base2_changes)
-                st.metric("Avg Sessions Change (Base2)", f"{avg_change_base2:+.1f}%")
 
 def main():
     # Header
-    st.markdown('<h1 class="main-header">📊 Campaign Analysis - Final Version</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📊 Campaign Analysis - Single Base Week</h1>', unsafe_allow_html=True)
     
     # Initialize session state
     if 'active_sections' not in st.session_state:
