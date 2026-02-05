@@ -559,6 +559,18 @@ def render_campaign_weeks_input(section_id):
 def render_analysis_section(ga_data, shopify_data, section_id):
     """Render a complete analysis section with input form and report display"""
     
+    # Import required modules
+    from datetime import date, timedelta, datetime
+    
+    # Validate input data
+    if ga_data is None or ga_data.empty:
+        st.error("GA data is not available or empty")
+        return
+    
+    if shopify_data is None or shopify_data.empty:
+        st.error("Shopify data is not available or empty")
+        return
+    
     # Initialize this section's data in session state if it doesn't exist
     if f'section_{section_id}' not in st.session_state:
         st.session_state[f'section_{section_id}'] = {
@@ -578,37 +590,73 @@ def render_analysis_section(ga_data, shopify_data, section_id):
     """, unsafe_allow_html=True)
     
     # Get date range from GA data for defaults
-    min_date = ga_data['Date'].min().date()
-    max_date = ga_data['Date'].max().date()
+    if ga_data is not None and not ga_data.empty and 'Date' in ga_data.columns:
+        try:
+            min_date = ga_data['Date'].min().date()
+            max_date = ga_data['Date'].max().date()
+        except Exception as e:
+            st.error(f"Error accessing Date column: {str(e)}")
+            # Use fallback dates
+            max_date = date.today()
+            min_date = max_date - timedelta(days=30)
+    else:
+        st.error("Date column not found in GA data")
+        # Use fallback dates
+        max_date = date.today()
+        min_date = max_date - timedelta(days=30)
     
     # Column selection
     st.subheader("📊 Column Configuration")
     col1, col2 = st.columns(2)
     
     with col1:
-        ga_columns = list(ga_data.columns)
-        region_column = st.selectbox(
-            "Select Region Column from GA Data",
-            options=ga_columns,
-            index=next((i for i, col in enumerate(ga_columns) if 'region' in col.lower()), 0),
-            help="Select the column that contains region information",
-            key=f"region_col_{section_id}"
-        )
+        ga_columns = list(ga_data.columns) if ga_data is not None and not ga_data.empty else []
+        if not ga_columns:
+            st.error("No GA data columns available")
+            region_column = None
+        else:
+            region_column = st.selectbox(
+                "Select Region Column from GA Data",
+                options=ga_columns,
+                index=next((i for i, col in enumerate(ga_columns) if 'region' in col.lower()), 0),
+                help="Select the column that contains region information",
+                key=f"region_col_{section_id}"
+            )
     
     with col2:
-        shopify_columns = list(shopify_data.columns)
-        shopify_region_column = st.selectbox(
-            "Select Region Column from Shopify Data",
-            options=shopify_columns,
-            index=next((i for i, col in enumerate(shopify_columns) if 'region' in col.lower()), 0),
-            help="Select the column that contains region information in Shopify data",
-            key=f"shopify_region_col_{section_id}"
-        )
+        shopify_columns = list(shopify_data.columns) if shopify_data is not None and not shopify_data.empty else []
+        if not shopify_columns:
+            st.error("No Shopify data columns available")
+            shopify_region_column = None
+        else:
+            shopify_region_column = st.selectbox(
+                "Select Region Column from Shopify Data",
+                options=shopify_columns,
+                index=next((i for i, col in enumerate(shopify_columns) if 'region' in col.lower()), 0),
+                help="Select the column that contains region information in Shopify data",
+                key=f"shopify_region_col_{section_id}"
+            )
     
     # Session source configuration
     st.subheader("🔍 Session Source Configuration")
     
-    all_sources = sorted(list(ga_data['Session source'].unique())) if 'Session source' in ga_data.columns else []
+    all_sources = []
+    if ga_data is not None and not ga_data.empty and 'Session source' in ga_data.columns:
+        try:
+            # Handle mixed data types and NaN values
+            source_series = ga_data['Session source'].dropna()  # Remove NaN values
+            unique_sources = source_series.unique()
+            
+            # Convert all values to strings and filter out empty ones
+            string_sources = [str(source).strip() for source in unique_sources if str(source).strip() and str(source).lower() != 'nan']
+            
+            # Sort the cleaned sources
+            all_sources = sorted(string_sources)
+        except Exception as e:
+            st.error(f"Error accessing Session source column: {str(e)}")
+            all_sources = []
+    elif ga_data is not None and not ga_data.empty:
+        st.warning("'Session source' column not found in GA data")
     
     google_sources = st.multiselect(
         "Select Google Session Sources",
@@ -722,9 +770,32 @@ def render_analysis_section(ga_data, shopify_data, section_id):
     # Region selection
     st.subheader("🌍 Region Configuration")
     
-    available_regions = sorted(list(ga_data[region_column].unique())) if region_column in ga_data.columns else []
+    # Safe region extraction with proper validation
+    available_regions = []
+    if ga_data is not None and not ga_data.empty and region_column and region_column in ga_data.columns:
+        try:
+            # Handle mixed data types and NaN values
+            region_series = ga_data[region_column].dropna()  # Remove NaN values
+            unique_regions = region_series.unique()
+            
+            # Convert all values to strings and filter out empty ones
+            string_regions = [str(region).strip() for region in unique_regions if str(region).strip() and str(region).lower() != 'nan']
+            
+            # Sort the cleaned regions
+            available_regions = sorted(string_regions)
+        except Exception as e:
+            st.error(f"Error accessing region column '{region_column}': {str(e)}")
+            available_regions = []
     
-    st.write(f"**Available Regions from '{region_column}' ({len(available_regions)}):**")
+    st.write(f"**Available Regions from '{region_column or 'N/A'}' ({len(available_regions)}):**")
+    
+    # Show data quality info if there are issues
+    if ga_data is not None and not ga_data.empty and region_column and region_column in ga_data.columns:
+        total_rows = len(ga_data)
+        non_null_rows = ga_data[region_column].notna().sum()
+        if non_null_rows < total_rows:
+            st.info(f"Note: {total_rows - non_null_rows} rows have missing region values (out of {total_rows} total)")
+    
     if len(available_regions) <= 10:
         st.write(", ".join(available_regions))
     else:
@@ -780,8 +851,33 @@ def render_analysis_section(ga_data, shopify_data, section_id):
     # Generate analysis if button clicked
     if generate_button:
         with st.spinner("Generating analysis..."):
+            # Debug: Show what variables we have
+            st.write("🔍 **Debug Info:**")
+            st.write(f"- Region column: {region_column}")
+            st.write(f"- Shopify region column: {shopify_region_column}")
+            st.write(f"- Selected regions: {selected_regions}")
+            st.write(f"- Campaign weeks: {len(campaign_weeks) if campaign_weeks else 0}")
+            st.write(f"- Base week start: {base_week_start}")
+            st.write(f"- Base week end: {base_week_end}")
+            
+            # Validate required parameters before analysis
+            if not region_column:
+                st.error("Please select a valid region column from GA data")
+                return
+            
+            if not shopify_region_column:
+                st.error("Please select a valid region column from Shopify data")
+                return
+            
+            if not selected_regions:
+                st.error("Please select at least one target region")
+                return
+            
+            if not campaign_weeks:
+                st.error("Please add at least one campaign week")
+                return
+            
             try:
-                # Create analysis using DuckDB
                 results, base_divisor, conn = create_analysis_with_duckdb(
                     ga_data, shopify_data, selected_regions,
                     base_week_start, base_week_end,
@@ -830,6 +926,14 @@ def render_analysis_section(ga_data, shopify_data, section_id):
                 
                 st.success(f"✅ Analysis #{section_id} generated successfully!")
                 st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error during analysis: {str(e)}")
+                st.error("Please check your data and configuration settings.")
+                # Add more detailed error information
+                import traceback
+                st.code(traceback.format_exc())
+                return
                 
             except Exception as e:
                 st.error(f"Error generating analysis: {str(e)}")
@@ -917,6 +1021,10 @@ def main():
         key="shopify_upload"
     )
     
+    # Initialize data variables
+    ga_data = None
+    shopify_data = None
+    
     # Data preview in sidebar
     if ga_file and shopify_file:
         st.sidebar.markdown("---")
@@ -967,14 +1075,18 @@ def main():
         """)
         return
     
-    # Render all active analysis sections
-    for section_id in st.session_state.active_sections:
-        render_analysis_section(ga_data, shopify_data, section_id)
-        
-        # Add separator between sections (except for the last one)
-        if section_id != st.session_state.active_sections[-1]:
-            st.markdown("---")
-            st.markdown("---")
+    # Only render analysis sections if data is properly loaded
+    if ga_data is not None and shopify_data is not None and not ga_data.empty and not shopify_data.empty:
+        # Render all active analysis sections
+        for section_id in st.session_state.active_sections:
+            render_analysis_section(ga_data, shopify_data, section_id)
+            
+            # Add separator between sections (except for the last one)
+            if section_id != st.session_state.active_sections[-1]:
+                st.markdown("---")
+                st.markdown("---")
+    else:
+        st.error("Data is not properly loaded. Please check your uploaded files.")
     
     # Data preview
     if ga_file and shopify_file:
